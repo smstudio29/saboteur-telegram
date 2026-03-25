@@ -1,4 +1,6 @@
 const { Telegraf, Markup } = require("telegraf")
+const { createCanvas, loadImage } = require("canvas")
+const path = require("path")
 
 const bot = new Telegraf(process.env.BOT_TOKEN)
 let games = {}
@@ -14,15 +16,6 @@ function createBoard() {
     board[4][4] = "🏠"
     board[4][8] = "🪙"
     return board
-}
-
-function boardToText(board) {
-    let text = ""
-    for (let y = 0; y < board.length; y++) {
-        for (let x = 0; x < board[y].length; x++) text += board[y][x]
-        text += "\n"
-    }
-    return text
 }
 
 function createDeck() {
@@ -77,6 +70,31 @@ function showPlayerActions(player) {
     return "🎴 Твои карты действий:\n" + player.actions.map((c,i)=>`${i+1}. ${c}`).join("\n")
 }
 
+// ======= Рисование поля =======
+async function renderBoardImage(board) {
+    const tileSize = 64
+    const canvas = createCanvas(board[0].length*tileSize, board.length*tileSize)
+    const ctx = canvas.getContext("2d")
+    for(let y=0;y<board.length;y++){
+        for(let x=0;x<board[y].length;x++){
+            let imgPath
+            switch(board[y][x]){
+                case "🏠": imgPath="images/tile_start.png"; break
+                case "🪙": imgPath="images/tile_gold.png"; break
+                case "⬜": imgPath="images/tile_tunnel.png"; break
+                case "🟫": imgPath="images/tile_tunnel.png"; break
+                case "🟦": imgPath="images/tile_tunnel.png"; break
+                case "❌": imgPath="images/tile_block.png"; break
+                default: imgPath="images/tile_empty.png"
+            }
+            const img = await loadImage(path.join(__dirname,imgPath))
+            ctx.drawImage(img, x*tileSize, y*tileSize, tileSize, tileSize)
+        }
+    }
+    return canvas.toBuffer()
+}
+
+// ======= Ход игрока =======
 function sendTurn(game, gameId) {
     const player = game.players[game.turn]
     bot.telegram.sendMessage(
@@ -133,7 +151,9 @@ bot.action(/start_(.+)/,(ctx)=>{
     game.players.forEach(player=>{
         player.actions = createActionDeck().slice(0,3)
     })
-    ctx.reply("🗺 Игровое поле:\n\n"+boardToText(game.board))
+    renderBoardImage(game.board).then(buffer=>{
+        ctx.replyWithPhoto({source:buffer}, {caption:"🗺 Игровое поле"})
+    })
     game.players.forEach((player,i)=>{
         const roleText=roles[i]==="miner"?"⛏ Ты ГНОМ. Строй туннель к золоту.":"💣 Ты ВРЕДИТЕЛЬ. Помешай гномам."
         bot.telegram.sendMessage(player.id,roleText)
@@ -141,7 +161,7 @@ bot.action(/start_(.+)/,(ctx)=>{
     sendTurn(game,gameId)
 })
 
-bot.action(/place_(.+)/,(ctx)=>{
+bot.action(/place_(.+)/,async (ctx)=>{
     const gameId = ctx.match[1]
     const game = games[gameId]
     if(!game) return
@@ -161,15 +181,17 @@ bot.action(/place_(.+)/,(ctx)=>{
     ctx.reply("Выбери клетку для туннеля:",Markup.inlineKeyboard(buttons))
 })
 
-bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
+bot.action(/put_(.+)_(\d+)_(\d+)/,async (ctx)=>{
     const gameId=ctx.match[1], x=parseInt(ctx.match[2]), y=parseInt(ctx.match[3]), game=games[gameId]
     if(!game) return
     if(!canPlaceTunnel(game.board,x,y)){ctx.answerCbQuery("❌ Нельзя ставить сюда карту!");return}
 
     let card=game.deck.pop()||"⬜"
     game.board[y][x]=card
-    ctx.reply("⛏ Игрок поставил туннель\n\n"+boardToText(game.board))
     game.log.push(`${ctx.from.first_name} поставил туннель на X${x} Y${y} (${card})`)
+
+    const buffer = await renderBoardImage(game.board)
+    ctx.replyWithPhoto({ source: buffer }, { caption: `⛏ ${ctx.from.first_name} сделал ход` })
 
     game.players.forEach(p=>{
         bot.telegram.sendMessage(p.id,"📝 Последние ходы:\n"+game.log.slice(-5).join("\n"))
@@ -197,53 +219,5 @@ bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
     sendTurn(game,gameId)
 })
 
-bot.action(/action_(.+)/,(ctx)=>{
-    const gameId = ctx.match[1]
-    const game = games[gameId]
-    if(!game) return
-    const player = game.players[game.turn]
-    if(ctx.from.id !== player.id){ctx.answerCbQuery("❌ Не твой ход");return}
-
-    const buttons=[]
-    for(let y=0;y<game.board.length;y++){
-        const row=[]
-        for(let x=0;x<game.board[y].length;x++){
-            if(game.board[y][x]!=="⬛" && game.board[y][x]!=="🏠" && game.board[y][x]!=="🪙"){
-                row.push(Markup.button.callback(`X${x} Y${y}`,`useaction_${gameId}_${x}_${y}`))
-            }
-        }
-        if(row.length>0) buttons.push(row)
-    }
-    if(buttons.length===0){ctx.reply("⚠ Нет клеток для действия."); return}
-
-    ctx.reply("Выбери клетку для применения карты действия:", Markup.inlineKeyboard(buttons))
-})
-
-bot.action(/useaction_(.+)_(\d+)_(\d+)/,(ctx)=>{
-    const gameId=ctx.match[1], x=parseInt(ctx.match[2]), y=parseInt(ctx.match[3])
-    const game = games[gameId]
-    if(!game) return
-    const player = game.players[game.turn]
-    if(!player.actions || player.actions.length===0){ctx.reply("🃏 У тебя нет карт действий"); return}
-    const card = player.actions.shift()
-
-    if(card==="💣"){
-        game.board[y][x]="❌"
-        ctx.reply(`💣 Игрок сломал туннель!\n\n`+boardToText(game.board))
-        game.log.push(`${ctx.from.first_name} использовал 💣 на X${x} Y${y}`)
-    }else if(card==="🔨"){
-        game.board[y][x]="⬜"
-        ctx.reply(`🔨 Игрок починил туннель!\n\n`+boardToText(game.board))
-        game.log.push(`${ctx.from.first_name} использовал 🔨 на X${x} Y${y}`)
-    }
-
-    game.players.forEach(p=>{
-        bot.telegram.sendMessage(p.id,"📝 Последние ходы:\n"+game.log.slice(-5).join("\n"))
-    })
-
-    game.turn = (game.turn+1)%game.players.length
-    sendTurn(game,gameId)
-})
-
 bot.launch()
-console.log("🚀 Saboteur bot with actions and logs started")
+console.log("🚀 Saboteur bot with graphics started")
