@@ -66,6 +66,16 @@ function canPlaceTunnel(board, x, y) {
     return false
 }
 
+function getAvailableCells(board) {
+    let cells = []
+    for (let y = 0; y < board.length; y++) {
+        for (let x = 0; x < board[y].length; x++) {
+            if (canPlaceTunnel(board, x, y)) cells.push({x, y})
+        }
+    }
+    return cells
+}
+
 // ======= Команды бота =======
 bot.start((ctx)=>{
     ctx.reply("⛏ Saboteur\n\nСоздать новую игру?",
@@ -109,25 +119,38 @@ bot.action(/start_(.+)/,(ctx)=>{
 })
 
 bot.action(/place_(.+)/,(ctx)=>{
-    const gameId=ctx.match[1], game=games[gameId]
+    const gameId = ctx.match[1]
+    const game = games[gameId]
     if(!game) return
-    const player=game.players[game.turn]
+    const player = game.players[game.turn]
     if(ctx.from.id!==player.id){ctx.answerCbQuery("❌ Не твой ход");return}
-    ctx.reply("Выбери координаты для туннеля:",
-        Markup.inlineKeyboard([
-            [Markup.button.callback("X4 Y3","put_"+gameId+"_4_3"), Markup.button.callback("X4 Y5","put_"+gameId+"_4_5")]
-        ]))
+
+    const available = getAvailableCells(game.board)
+    if(available.length===0){
+        ctx.reply("⚠ Нет доступных клеток для размещения туннеля.")
+        return
+    }
+
+    const buttons=[]
+    for(let i=0;i<available.length;i+=3){
+        const row=available.slice(i,i+3).map(c=>
+            Markup.button.callback(`X${c.x} Y${c.y}`,`put_${gameId}_${c.x}_${c.y}`)
+        )
+        buttons.push(row)
+    }
+
+    ctx.reply("Выбери клетку для туннеля:",Markup.inlineKeyboard(buttons))
 })
 
 bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
     const gameId=ctx.match[1], x=parseInt(ctx.match[2]), y=parseInt(ctx.match[3]), game=games[gameId]
     if(!game) return
     if(!canPlaceTunnel(game.board,x,y)){ctx.answerCbQuery("❌ Нельзя ставить сюда карту!");return}
+
     let card=game.deck.pop()||"⬜"
     game.board[y][x]=card
     ctx.reply("⛏ Игрок поставил туннель\n\n"+boardToText(game.board))
 
-    // проверка победы гномов
     if(game.board[y][x]==="🪙" && card!=="❌"){
         ctx.reply("🎉 ГНОМЫ достигли золота! Победа гномов!")
         game.players.forEach(p=>{
@@ -138,7 +161,6 @@ bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
         return
     }
 
-    // проверка победы вредителей
     if(game.deck.length===0){
         ctx.reply("💣 Колода закончилась! Победа ВРЕДИТЕЛЕЙ!")
         game.players.forEach(p=>{
@@ -149,7 +171,6 @@ bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
         return
     }
 
-    // переход хода
     game.turn=(game.turn+1)%game.players.length
     sendTurn(game,gameId)
 })
