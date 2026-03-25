@@ -60,3 +60,54 @@ bot.action(/join_(.+)/, (ctx) => {
 bot.launch()
 
 console.log("🚀 Saboteur bot started")
+
+function assignRoles(players) {
+
+    let roles = []
+
+    let saboteurs = Math.max(1, Math.floor(players.length / 3))
+
+    for (let i = 0; i < saboteurs; i++) {
+        roles.push("saboteur")
+    }
+
+    while (roles.length < players.length) {
+        roles.push("miner")
+    }
+
+    return roles.sort(() => Math.random() - 0.5)
+
+}
+
+bot.action(/start_(.+)/, async (ctx) => {
+
+    const gameId = ctx.match[1]
+    const game = games[gameId]
+
+    if (!game) {
+        ctx.reply("Игра не найдена")
+        return
+    }
+
+    if (game.players.length < 3) {
+        ctx.reply("❗ Нужно минимум 3 игрока")
+        return
+    }
+
+    game.started = true
+
+    const roles = assignRoles(game.players)
+
+    ctx.reply("🎮 Игра началась!")
+
+    game.players.forEach((player, i) => {
+
+        let roleText = roles[i] === "miner"
+            ? "⛏ Ты ГНОМ. Строй туннель к золоту."
+            : "💣 Ты ВРЕДИТЕЛЬ. Помешай гномам."
+
+        bot.telegram.sendMessage(player.id, roleText)
+
+    })
+
+})
