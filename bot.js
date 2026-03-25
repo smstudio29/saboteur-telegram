@@ -25,12 +25,13 @@ bot.action("create_game", (ctx) => {
         started: false
     }
 
-    ctx.reply(
-        `🎮 Игра создана!\n\nID: ${gameId}`,
-        Markup.inlineKeyboard([
-            Markup.button.callback("➕ Присоединиться", "join_" + gameId)
-        ])
-    )
+ctx.reply(
+    `🎮 Игра создана!\n\nID: ${gameId}`,
+    Markup.inlineKeyboard([
+        [Markup.button.callback("➕ Присоединиться", "join_" + gameId)],
+        [Markup.button.callback("▶ Начать игру", "start_" + gameId)]
+    ])
+)
 
 })
 
