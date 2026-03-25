@@ -95,9 +95,16 @@ bot.start((ctx)=>{
         Markup.inlineKeyboard([Markup.button.callback("🎮 Создать игру","create_game")]))
 })
 
+bot.command("log", (ctx)=>{
+    const game = Object.values(games).find(g => g.players.some(p=>p.id===ctx.from.id))
+    if(!game) return ctx.reply("❌ Ты не участвуешь в активной игре")
+    if(!game.log || game.log.length===0) return ctx.reply("📝 Лог пока пуст")
+    ctx.reply("📝 Лог игры:\n" + game.log.join("\n"))
+})
+
 bot.action("create_game",(ctx)=>{
     const gameId = Math.random().toString(36).substring(2,8)
-    games[gameId] = {players:[ctx.from], started:false}
+    games[gameId] = {players:[ctx.from], started:false, log: []}
     ctx.reply(`🎮 Игра создана!\n\nID: ${gameId}`,
         Markup.inlineKeyboard([
             [Markup.button.callback("➕ Присоединиться","join_"+gameId)],
@@ -162,6 +169,11 @@ bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
     let card=game.deck.pop()||"⬜"
     game.board[y][x]=card
     ctx.reply("⛏ Игрок поставил туннель\n\n"+boardToText(game.board))
+    game.log.push(`${ctx.from.first_name} поставил туннель на X${x} Y${y} (${card})`)
+
+    game.players.forEach(p=>{
+        bot.telegram.sendMessage(p.id,"📝 Последние ходы:\n"+game.log.slice(-5).join("\n"))
+    })
 
     if(game.board[y][x]==="🪙" && card!=="❌"){
         ctx.reply("🎉 ГНОМЫ достигли золота! Победа гномов!")
@@ -186,7 +198,7 @@ bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
 })
 
 bot.action(/action_(.+)/,(ctx)=>{
-    const gameId=ctx.match[1]
+    const gameId = ctx.match[1]
     const game = games[gameId]
     if(!game) return
     const player = game.players[game.turn]
@@ -218,14 +230,20 @@ bot.action(/useaction_(.+)_(\d+)_(\d+)/,(ctx)=>{
     if(card==="💣"){
         game.board[y][x]="❌"
         ctx.reply(`💣 Игрок сломал туннель!\n\n`+boardToText(game.board))
+        game.log.push(`${ctx.from.first_name} использовал 💣 на X${x} Y${y}`)
     }else if(card==="🔨"){
         game.board[y][x]="⬜"
         ctx.reply(`🔨 Игрок починил туннель!\n\n`+boardToText(game.board))
+        game.log.push(`${ctx.from.first_name} использовал 🔨 на X${x} Y${y}`)
     }
+
+    game.players.forEach(p=>{
+        bot.telegram.sendMessage(p.id,"📝 Последние ходы:\n"+game.log.slice(-5).join("\n"))
+    })
 
     game.turn = (game.turn+1)%game.players.length
     sendTurn(game,gameId)
 })
 
 bot.launch()
-console.log("🚀 Saboteur bot with action cards started")
+console.log("🚀 Saboteur bot with actions and logs started")
