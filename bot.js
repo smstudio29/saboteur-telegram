@@ -11,7 +11,8 @@ function createBoard() {
         board[y] = []
         for (let x = 0; x < size; x++) board[y][x] = "⬛"
     }
-    board[4][4] = "🏠"
+    board[4][4] = "🏠"      // стартовая клетка
+    board[4][8] = "🪙"      // золото
     return board
 }
 
@@ -52,13 +53,12 @@ function assignRoles(players) {
     return roles.sort(() => Math.random() - 0.5)
 }
 
-// проверка, можно ли ставить карту
 function canPlaceTunnel(board, x, y) {
     if (x < 0 || x >= board[0].length || y < 0 || y >= board.length) return false
     if (board[y][x] !== "⬛") return false
     const directions = [[0,1],[1,0],[0,-1],[-1,0]]
     for (let [dx,dy] of directions) {
-        let nx = x + dx, ny = y + dy
+        let nx=x+dx, ny=y+dy
         if (nx>=0 && nx<board[0].length && ny>=0 && ny<board.length) {
             if (board[ny][nx]!=="⬛") return true
         }
@@ -126,6 +126,30 @@ bot.action(/put_(.+)_(\d+)_(\d+)/,(ctx)=>{
     let card=game.deck.pop()||"⬜"
     game.board[y][x]=card
     ctx.reply("⛏ Игрок поставил туннель\n\n"+boardToText(game.board))
+
+    // проверка победы гномов
+    if(game.board[y][x]==="🪙" && card!=="❌"){
+        ctx.reply("🎉 ГНОМЫ достигли золота! Победа гномов!")
+        game.players.forEach(p=>{
+            const msg=game.roles[game.players.indexOf(p)]==="miner"?"🏆 Ты выиграл!":"💀 Ты проиграл!"
+            bot.telegram.sendMessage(p.id,msg)
+        })
+        delete games[gameId]
+        return
+    }
+
+    // проверка победы вредителей
+    if(game.deck.length===0){
+        ctx.reply("💣 Колода закончилась! Победа ВРЕДИТЕЛЕЙ!")
+        game.players.forEach(p=>{
+            const msg=game.roles[game.players.indexOf(p)]==="saboteur"?"🏆 Ты выиграл!":"💀 Ты проиграл!"
+            bot.telegram.sendMessage(p.id,msg)
+        })
+        delete games[gameId]
+        return
+    }
+
+    // переход хода
     game.turn=(game.turn+1)%game.players.length
     sendTurn(game,gameId)
 })
